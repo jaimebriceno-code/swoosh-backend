@@ -14,7 +14,7 @@ app.add_middleware(
 )
 
 # Replace with your LocalAI VM's IP
-LOCALAI_URL = "http://<YOUR_VM_IP>:8080/v1/chat/completions"
+LOCALAI_URL = "http://34.123.143.255:8080/v1/chat/completions"
 
 @app.post("/chat")
 async def chat(request: Request):
