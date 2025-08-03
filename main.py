@@ -28,3 +28,13 @@ async def chat(request: Request):
         return {"error": f"Request error: {str(e)}"}
     except httpx.HTTPStatusError as e:
         return {"error": f"LocalAI responded with {e.response.status_code}"}
+
+@app.get("/test-vm")
+async def test_vm():
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get("http://34.123.143.255:8080/v1/models")
+            r.raise_for_status()
+            return r.json()
+    except Exception as e:
+        return {"error": str(e)}
