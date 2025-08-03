@@ -1,40 +1,29 @@
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-import httpx
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import requests
 
 app = FastAPI()
 
-# Allow your Builder.io environment
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+OLLAMA_URL = "http://localhost:11434/api/chat"
 
-# Replace with your LocalAI VM's IP
-LOCALAI_URL = "http://34.123.143.255:8080/v1/chat/completions"
+class Message(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    messages: list[Message]
 
 @app.post("/chat")
-async def chat(request: Request):
-    payload = await request.json()
+def chat_with_ollama(request: ChatRequest):
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(LOCALAI_URL, json=payload)
-            response.raise_for_status()
-            return response.json()
-    except httpx.RequestError as e:
-        return {"error": f"Request error: {str(e)}"}
-    except httpx.HTTPStatusError as e:
-        return {"error": f"LocalAI responded with {e.response.status_code}"}
-
-@app.get("/test-vm")
-async def test_vm():
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get("http://34.123.143.255:8080/v1/models")
-            r.raise_for_status()
-            return r.json()
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": "llama3",
+                "messages": [msg.dict() for msg in request.messages]
+            }
+        )
+        response.raise_for_status()
+        return response.json()["message"]
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
