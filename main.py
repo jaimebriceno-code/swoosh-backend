@@ -7,7 +7,7 @@ app = FastAPI()
 # Allow your Builder.io environment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://25a4a46a8ed34411919d4d671bde7717-main.projects.builder.my"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
