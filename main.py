@@ -1,29 +1,40 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 import requests
 
 app = FastAPI()
 
-OLLAMA_URL = "http://localhost:11434/api/chat"
-
-class Message(BaseModel):
-    role: str
-    content: str
 
 class ChatRequest(BaseModel):
-    messages: list[Message]
+    prompt: str
+
+
+@app.get("/")
+def read_root():
+    return {"message": "Swoosh Backend is running on the VM and connected to Ollama!"}
+
 
 @app.post("/chat")
 def chat_with_ollama(request: ChatRequest):
+    ollama_url = "http://localhost:11434/api/chat"
+
     try:
         response = requests.post(
-            OLLAMA_URL,
+            ollama_url,
             json={
                 "model": "llama3",
-                "messages": [msg.dict() for msg in request.messages]
+                "messages": [
+                    {"role": "user", "content": request.prompt}
+                ]
             }
         )
+
         response.raise_for_status()
-        return response.json()["message"]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        data = response.json()
+        return {
+            "response": data.get("message", {}).get("content", ""),
+            "full": data
+        }
+
+    except requests.exceptions.RequestException as e:
+        return {"error": str(e)}
