@@ -1,40 +1,25 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from pydantic import BaseModel
 import requests
 
 app = FastAPI()
 
-
-class ChatRequest(BaseModel):
+class PromptRequest(BaseModel):
     prompt: str
 
-
-@app.get("/")
-def read_root():
-    return {"message": "Swoosh Backend is running on the VM and connected to Ollama!"}
-
-
-@app.post("/chat")
-def chat_with_ollama(request: ChatRequest):
-    ollama_url = "http://localhost:11434/api/chat"
-
+@app.post("/ask")
+def ask_ollama(req: PromptRequest):
     try:
         response = requests.post(
-            ollama_url,
+            "http://34.123.143.255:11434/api/generate",
             json={
                 "model": "llama3",
-                "messages": [
-                    {"role": "user", "content": request.prompt}
-                ]
-            }
+                "prompt": req.prompt,
+                "stream": False
+            },
+            timeout=60
         )
-
-        response.raise_for_status()
         data = response.json()
-        return {
-            "response": data.get("message", {}).get("content", ""),
-            "full": data
-        }
-
-    except requests.exceptions.RequestException as e:
+        return {"response": data.get("response", "No reply")}
+    except Exception as e:
         return {"error": str(e)}
