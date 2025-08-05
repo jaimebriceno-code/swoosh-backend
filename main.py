@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 import requests
+import json
 
 app = FastAPI()
 
 # === CORS CONFIG ===
-# Wide-open for testing — switch to your Builder.io domain in production
+# Wide-open for testing — restrict to Builder.io domain in production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,40 +17,48 @@ app.add_middleware(
 )
 
 # === CONFIG ===
-OLLAMA_URL = "http://34.123.143.255:11434/api/generate"  # VM Ollama endpoint
-OLLAMA_MODEL = "empathetic_chicago"  # Your custom model
+OLLAMA_URL = "http://34.123.143.255:11434/api/generate"
+OLLAMA_MODEL = "empathetic_chicago"
 
 # === TEST ROUTE ===
 @app.get("/")
 def root():
     return {"message": "FastAPI backend is running"}
 
-# === ASK ENDPOINT ===
+# === STREAMING ASK ENDPOINT ===
 @app.post("/ask")
 async def ask(request: Request):
+    """
+    Streams tokens from Ollama to the frontend as they are generated.
+    """
     try:
         data = await request.json()
         prompt = data.get("prompt", "").strip()
 
         if not prompt:
-            return {"response": "❌ No prompt provided"}
+            return StreamingResponse(iter(["❌ No prompt provided"]), media_type="text/plain")
 
-        # Send prompt to Ollama
-        ollama_response = requests.post(
-            OLLAMA_URL,
-            json={
-                "model": OLLAMA_MODEL,
-                "prompt": prompt
-            }
-        )
+        def generate():
+            with requests.post(
+                OLLAMA_URL,
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": True
+                },
+                stream=True
+            ) as r:
+                for line in r.iter_lines():
+                    if line:
+                        try:
+                            payload = json.loads(line.decode("utf-8"))
+                            chunk = payload.get("response", "")
+                            if chunk:
+                                yield chunk
+                        except json.JSONDecodeError:
+                            pass
 
-        if ollama_response.status_code != 200:
-            return {"response": f"Error from Ollama: {ollama_response.text}"}
-
-        ollama_json = ollama_response.json()
-        ollama_text = ollama_json.get("response", "").strip()
-
-        return {"response": ollama_text}
+        return StreamingResponse(generate(), media_type="text/plain")
 
     except Exception as e:
-        return {"response": f"⚠️ Error processing request: {str(e)}"}
+        return StreamingResponse(iter([f"⚠️ Error: {str(e)}"]), media_type="text/plain")
