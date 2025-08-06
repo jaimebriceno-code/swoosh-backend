@@ -6,13 +6,14 @@ import requests
 import json
 import psycopg2
 import os
+from urllib.parse import urlparse
 
 app = FastAPI()
 
 # === CORS CONFIG ===
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Restrict to your domain in production
+    allow_origins=["*"],  # TODO: Restrict in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -22,12 +23,22 @@ app.add_middleware(
 OLLAMA_URL = "http://34.123.143.255:11434/api/generate"
 OLLAMA_MODELS = ["empathetic_chicago", "ollama3"]
 
-# === DATABASE CONFIG (SSL FIX) ===
+# === DATABASE CONFIG (RENDER SSL-HARDENED) ===
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://community_db_s5t2_user:2icMmLn8kmn0ZMob9XILHg9UKWIei1GB@dpg-d24hk03e5dus73ac32og-a.ohio-postgres.render.com:5432/community_db_s5t2?sslmode=require"
+    "postgresql://community_db_s5t2_user:2icMmLn8kmn0ZMob9XILHg9UKWIei1GB@dpg-d24hk03e5dus73ac32og-a.ohio-postgres.render.com:5432/community_db_s5t2"
 )
-conn = psycopg2.connect(DATABASE_URL)
+
+parsed_url = urlparse(DATABASE_URL)
+conn = psycopg2.connect(
+    dbname=parsed_url.path.lstrip('/'),
+    user=parsed_url.username,
+    password=parsed_url.password,
+    host=parsed_url.hostname,
+    port=parsed_url.port or 5432,
+    sslmode="require",
+    sslrootcert="/etc/ssl/certs/ca-certificates.crt"
+)
 
 # === RESEND EMAIL CONFIG ===
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_S3Xe3Wce_PxkComorKYxGYfvaxgk2b9TD")
@@ -67,7 +78,7 @@ class ServiceSubmission(BaseModel):
     description: str
     location: str
     category: str
-    submitter_email: str  # NEW for confirmation email
+    submitter_email: str  # For thank-you email
 
 # === ROOT TEST ===
 @app.get("/")
