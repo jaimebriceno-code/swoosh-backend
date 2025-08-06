@@ -12,15 +12,15 @@ app = FastAPI()
 # === CORS CONFIG ===
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Restrict in production
+    allow_origins=["*"],  # TODO: Restrict to your domain in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# === CONFIG ===
-OLLAMA_URL = "http://34.123.143.255:11434/api/generate"  # VM Ollama endpoint
-OLLAMA_MODEL = "empathetic_chicago"
+# === OLLAMA CONFIG ===
+OLLAMA_URL = "http://34.123.143.255:11434/api/generate"
+OLLAMA_MODELS = ["empathetic_chicago", "ollama3"]
 
 # === DATABASE CONFIG ===
 conn = psycopg2.connect(
@@ -33,23 +33,35 @@ conn = psycopg2.connect(
 
 # === RESEND EMAIL CONFIG ===
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_S3Xe3Wce_PxkComorKYxGYfvaxgk2b9TD")
-NOTIFY_EMAIL = "jbriceno@stmichaelangels.org"  # change this
+NOTIFY_EMAIL = "jbriceno@stmichaelangels.org"
+
+# === GOOGLE MAPS CONFIG ===
+GOOGLE_MAPS_KEY = os.getenv("GOOGLE_MAPS_KEY", "AIzaSyCWeTdvxVbUBXImsQJ6bMaGoEOjHn-sQa8")
 
 # === EMAIL FUNCTION ===
-def send_email_notification(subject, body):
+def send_email_notification(subject, body, recipient):
     url = "https://api.resend.com/emails"
     headers = {
         "Authorization": f"Bearer {RESEND_API_KEY}",
         "Content-Type": "application/json"
     }
     data = {
-        "from": "Community App <noreply@yourdomain.com>",
-        "to": [NOTIFY_EMAIL],
+        "from": "Community App <noreply@stmichaelangels.org>",
+        "to": [recipient],
         "subject": subject,
         "text": body
     }
-    res = requests.post(url, headers=headers, json=data)
-    return res.status_code, res.text
+    requests.post(url, headers=headers, json=data)
+
+# === GEOCODING FUNCTION ===
+def geocode_address(address: str):
+    url = "https://maps.googleapis.com/maps/api/geocode/json"
+    params = {"address": address, "key": GOOGLE_MAPS_KEY}
+    res = requests.get(url, params=params).json()
+    if res.get("status") == "OK":
+        location = res["results"][0]["geometry"]["location"]
+        return location["lat"], location["lng"]
+    return None, None
 
 # === FORM MODEL ===
 class ServiceSubmission(BaseModel):
@@ -57,6 +69,7 @@ class ServiceSubmission(BaseModel):
     description: str
     location: str
     category: str
+    submitter_email: str  # NEW field for confirmation email
 
 # === ROOT TEST ===
 @app.get("/")
@@ -66,21 +79,24 @@ def root():
 # === OLLAMA STREAMING ENDPOINT ===
 @app.post("/ask")
 async def ask(request: Request):
+    """
+    Streams tokens from Ollama model to frontend.
+    Accepts optional 'model' in body to choose between empathetic_chicago and ollama3.
+    """
     try:
         data = await request.json()
         prompt = data.get("prompt", "").strip()
+        model = data.get("model", OLLAMA_MODELS[0])
 
         if not prompt:
             return StreamingResponse(iter(["❌ No prompt provided"]), media_type="text/plain")
+        if model not in OLLAMA_MODELS:
+            model = OLLAMA_MODELS[0]
 
         def generate():
             with requests.post(
                 OLLAMA_URL,
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": True
-                },
+                json={"model": model, "prompt": prompt, "stream": True},
                 stream=True
             ) as r:
                 for line in r.iter_lines():
@@ -101,32 +117,56 @@ async def ask(request: Request):
 # === SUBMIT NEW SERVICE (PENDING) ===
 @app.post("/submit-service")
 def submit_service(data: ServiceSubmission):
+    lat, lng = geocode_address(data.location)
     with conn.cursor() as cur:
         cur.execute("""
-            INSERT INTO pending_services (service_name, description, location, category)
-            VALUES (%s, %s, %s, %s)
-        """, (data.service_name, data.description, data.location, data.category))
+            INSERT INTO pending_services (service_name, description, location, category, latitude, longitude)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (data.service_name, data.description, data.location, data.category, lat, lng))
         conn.commit()
 
-    # Send notification email
-    subject = f"New Pending Service: {data.service_name}"
-    body = f"Description: {data.description}\nLocation: {data.location}\nCategory: {data.category}"
-    send_email_notification(subject, body)
+    # Email to you (admin)
+    send_email_notification(
+        f"New Pending Service: {data.service_name}",
+        f"Description: {data.description}\nLocation: {data.location}\nCategory: {data.category}\nLat: {lat}, Lng: {lng}",
+        NOTIFY_EMAIL
+    )
 
-    return {"status": "pending", "message": "Service submitted for review."}
+    # Thank-you email to submitter
+    thank_you_body = (
+        f"Dear Friend,\n\n"
+        f"Thank you for your help in expanding the visibility of vital community services.\n"
+        f"Your submission to our ministry at St. Michael and All Angels will help ensure that "
+        f"those in need — and those looking to help others — can find the right resources.\n\n"
+        f"Your generosity and care are part of what makes our community stronger, "
+        f"and I am grateful for your support in this mission.\n\n"
+        f"In Christ,\n"
+        f"The Rev. Jaime Briceño\n"
+        f"Rector, St. Michael and All Angels Episcopal Church"
+    )
+    send_email_notification(
+        "Thank You for Supporting Our Community Services Ministry",
+        thank_you_body,
+        data.submitter_email
+    )
+
+    return {"status": "pending", "message": "Service submitted for review. Thank-you email sent."}
 
 # === APPROVE SERVICE ===
 @app.post("/approve-service/{service_id}")
 def approve_service(service_id: int):
     with conn.cursor() as cur:
-        cur.execute("SELECT service_name, description, location, category FROM pending_services WHERE id=%s", (service_id,))
+        cur.execute("""
+            SELECT service_name, description, location, category, latitude, longitude
+            FROM pending_services WHERE id=%s
+        """, (service_id,))
         service = cur.fetchone()
         if not service:
             raise HTTPException(status_code=404, detail="Service not found")
 
         cur.execute("""
-            INSERT INTO services (service_name, description, location, category)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO services (service_name, description, location, category, latitude, longitude)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """, service)
         cur.execute("DELETE FROM pending_services WHERE id=%s", (service_id,))
         conn.commit()
