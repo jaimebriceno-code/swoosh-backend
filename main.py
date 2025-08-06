@@ -129,4 +129,37 @@ def submit_service(data: ServiceSubmission):
         f"Dear Friend,\n\n"
         f"Thank you for your help in expanding the visibility of vital community services.\n"
         f"Your submission to our ministry at St. Michael and All Angels will help ensure that "
-        f"those in need — and those looking to help others — can find the righ
+        f"those in need — and those looking to help others — can find the right resources.\n\n"
+        f"Your generosity and care are part of what makes our community stronger, "
+        f"and I am grateful for your support in this mission.\n\n"
+        f"In Christ,\n"
+        f"The Rev. Jaime Briceño\n"
+        f"Rector, St. Michael and All Angels Episcopal Church"
+    )
+    send_email_notification(
+        "Thank You for Supporting Our Community Services Ministry",
+        thank_you_body,
+        data.submitter_email
+    )
+
+    return {"status": "pending", "message": "Service submitted for review. Thank-you email sent."}
+
+# === APPROVE SERVICE ===
+@app.post("/approve-service/{service_id}")
+def approve_service(service_id: int):
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT service_name, description, location, category, latitude, longitude
+            FROM pending_services WHERE id=%s
+        """, (service_id,))
+        service = cur.fetchone()
+        if not service:
+            raise HTTPException(status_code=404, detail="Service not found")
+
+        cur.execute("""
+            INSERT INTO services (service_name, description, location, category, latitude, longitude)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, service)
+        cur.execute("DELETE FROM pending_services WHERE id=%s", (service_id,))
+
+    return {"status": "approved"}
