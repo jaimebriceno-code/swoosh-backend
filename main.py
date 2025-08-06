@@ -22,14 +22,12 @@ app.add_middleware(
 OLLAMA_URL = "http://34.123.143.255:11434/api/generate"
 OLLAMA_MODELS = ["empathetic_chicago", "ollama3"]
 
-# === DATABASE CONFIG ===
-conn = psycopg2.connect(
-    dbname="community_db_s5t2",
-    user="community_db_s5t2_user",
-    password="2icMmLn8kmn0ZMob9XILHg9UKWIei1GB",
-    host="dpg-d24hk03e5dus73ac32og-a.ohio-postgres.render.com",
-    port="5432"
+# === DATABASE CONFIG (SSL FIX) ===
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://community_db_s5t2_user:2icMmLn8kmn0ZMob9XILHg9UKWIei1GB@dpg-d24hk03e5dus73ac32og-a.ohio-postgres.render.com:5432/community_db_s5t2?sslmode=require"
 )
+conn = psycopg2.connect(DATABASE_URL)
 
 # === RESEND EMAIL CONFIG ===
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_S3Xe3Wce_PxkComorKYxGYfvaxgk2b9TD")
@@ -69,7 +67,7 @@ class ServiceSubmission(BaseModel):
     description: str
     location: str
     category: str
-    submitter_email: str  # NEW field for confirmation email
+    submitter_email: str  # NEW for confirmation email
 
 # === ROOT TEST ===
 @app.get("/")
