@@ -6,6 +6,7 @@ import requests
 import json
 import psycopg2
 import os
+import time
 
 app = FastAPI()
 
@@ -22,13 +23,9 @@ app.add_middleware(
 OLLAMA_URL = "http://34.123.143.255:11434/api/generate"
 OLLAMA_MODELS = ["empathetic_chicago", "ollama3"]
 
-# === DATABASE CONNECTION (ONE-TIME) ===
+# === GLOBAL DB CONNECTION (initialized on startup) ===
+conn = None
 DATABASE_URL = os.getenv("DATABASE_URL")
-try:
-    conn = psycopg2.connect(DATABASE_URL)
-    conn.autocommit = True  # optional for immediate commit behavior
-except Exception as e:
-    raise RuntimeError(f"Database connection failed: {e}")
 
 # === RESEND EMAIL CONFIG ===
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
@@ -69,6 +66,22 @@ class ServiceSubmission(BaseModel):
     location: str
     category: str
     submitter_email: str
+
+# === STARTUP EVENT ===
+@app.on_event("startup")
+def startup_event():
+    global conn
+    retries = 5
+    for attempt in range(retries):
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            conn.autocommit = True
+            print("✅ Database connection established.")
+            return
+        except psycopg2.OperationalError as e:
+            print(f"⚠️ Database connection failed (attempt {attempt+1}/{retries}): {e}")
+            time.sleep(5)
+    raise RuntimeError("❌ Could not connect to the database after multiple retries.")
 
 # === ROOT TEST ===
 @app.get("/")
