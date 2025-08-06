@@ -13,7 +13,7 @@ app = FastAPI()
 # === CORS CONFIG ===
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # TODO: Restrict in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -23,7 +23,7 @@ app.add_middleware(
 OLLAMA_URL = "http://34.123.143.255:11434/api/generate"
 OLLAMA_MODELS = ["empathetic_chicago", "ollama3"]
 
-# === GLOBAL DB CONNECTION (initialized on startup) ===
+# === GLOBAL DB CONNECTION (will be set on startup) ===
 conn = None
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -33,6 +33,7 @@ NOTIFY_EMAIL = "jbriceno@stmichaelangels.org"
 
 # === GOOGLE MAPS CONFIG ===
 GOOGLE_MAPS_KEY = os.getenv("GOOGLE_MAPS_KEY")
+
 
 # === EMAIL FUNCTION ===
 def send_email_notification(subject, body, recipient):
@@ -49,6 +50,7 @@ def send_email_notification(subject, body, recipient):
     }
     requests.post(url, headers=headers, json=data)
 
+
 # === GEOCODING FUNCTION ===
 def geocode_address(address: str):
     url = "https://maps.googleapis.com/maps/api/geocode/json"
@@ -59,6 +61,7 @@ def geocode_address(address: str):
         return location["lat"], location["lng"]
     return None, None
 
+
 # === FORM MODEL ===
 class ServiceSubmission(BaseModel):
     service_name: str
@@ -67,26 +70,37 @@ class ServiceSubmission(BaseModel):
     category: str
     submitter_email: str
 
-# === STARTUP EVENT ===
+
+# === DB CONNECT FUNCTION ===
+def get_db_connection():
+    """Ensures we have a valid DB connection, reconnects if needed."""
+    global conn
+    if conn is None or conn.closed != 0:
+        conn = psycopg2.connect(DATABASE_URL)
+        conn.autocommit = True
+    return conn
+
+
+# === STARTUP EVENT WITH RETRIES ===
 @app.on_event("startup")
 def startup_event():
-    global conn
-    retries = 5
+    retries = 15  # 15 × 5s = 75 seconds total
     for attempt in range(retries):
         try:
-            conn = psycopg2.connect(DATABASE_URL)
-            conn.autocommit = True
+            get_db_connection()
             print("✅ Database connection established.")
             return
         except psycopg2.OperationalError as e:
             print(f"⚠️ Database connection failed (attempt {attempt+1}/{retries}): {e}")
             time.sleep(5)
-    raise RuntimeError("❌ Could not connect to the database after multiple retries.")
+    print("❌ Could not connect to the database at startup. Will retry on demand.")
+
 
 # === ROOT TEST ===
 @app.get("/")
 def root():
     return {"message": "FastAPI backend is running"}
+
 
 # === OLLAMA STREAMING ENDPOINT ===
 @app.post("/ask")
@@ -122,9 +136,11 @@ async def ask(request: Request):
     except Exception as e:
         return StreamingResponse(iter([f"⚠️ Error: {str(e)}"]), media_type="text/plain")
 
+
 # === SUBMIT NEW SERVICE ===
 @app.post("/submit-service")
 def submit_service(data: ServiceSubmission):
+    conn = get_db_connection()
     lat, lng = geocode_address(data.location)
     with conn.cursor() as cur:
         cur.execute("""
@@ -157,9 +173,11 @@ def submit_service(data: ServiceSubmission):
 
     return {"status": "pending", "message": "Service submitted for review. Thank-you email sent."}
 
+
 # === APPROVE SERVICE ===
 @app.post("/approve-service/{service_id}")
 def approve_service(service_id: int):
+    conn = get_db_connection()
     with conn.cursor() as cur:
         cur.execute("""
             SELECT service_name, description, location, category, latitude, longitude
