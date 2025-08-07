@@ -1,6 +1,8 @@
 fastapi
-uvicorn
-requests
-pydantic
+uvicorn[standard]
+sentence-transformers
+scikit-learn
+langdetect
 psycopg2-binary
-httpx
+geopy
+python-dotenv
